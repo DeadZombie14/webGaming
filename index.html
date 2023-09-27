@@ -31,9 +31,9 @@
         const hostID = url.searchParams.get('host');
         const id = (hostID) ? undefined : 'A1'
         const peer = new Peer(id, {
-            host: "192.168.1.72",
+            host: "localhost",
             port: 9000,
-            path: "/myapp",
+            path: "/",
 	    })
         peer.on('open', function(id) {
             console.log('My peer ID is: ' + id)
