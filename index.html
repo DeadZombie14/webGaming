@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebRTC test</title>
+    <style>
+        body {
+            box-sizing: content-box;
+            padding: 1rem;
+        }
+        #mainScreen {
+            width: 70%;
+            height: 30rem;
+            background: black;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #mainScreen video {
+            max-width: 100%;
+            max-height: 100%;
+        }
+    </style>
+    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    <script defer>
+        const connected = []
+        const mediaStreamCalls = []
+        let videoStreamSource = undefined
+
+        const url = new URL(window.location.href); 
+        const hostID = url.searchParams.get('host');
+        const id = (hostID) ? undefined : 'A1'
+        const peer = new Peer(id, {
+            host: "192.168.1.72",
+            port: 9000,
+            path: "/myapp",
+	    })
+        peer.on('open', function(id) {
+            console.log('My peer ID is: ' + id)
+            if (!hostID) {
+                // We are the master, listen for calls
+                peer.on('connection', function(conn) {
+                    conn.on('open', function() {
+                        conn.send(`welcome ${conn.peer} !`)
+                        connected.push(conn.peer) // Add to client list
+                        if(videoStreamSource) {
+                            mediaStreamCalls.push(peer.call(conn.peer, videoStreamSource));
+                        }
+                    })
+                    
+                    // Receive messages
+                    conn.on('data', function(data) {
+                        console.log(`${conn.peer} says: ${data}`)
+                    })
+
+                    // Client left, remove from list
+                    conn.on('close', function() {
+                        const index = connected.indexOf(conn.peer)
+                        if (index > -1) {
+                            connected.splice(index, 1);
+                        }
+                    })
+                });
+            } else {
+                console.log('Master id is: '+hostID)
+                // We are "clients", connect to master
+                const conn = peer.connect(hostID)
+                conn.on('open', function() {
+                    // Send messages
+                    conn.send('Hello!')
+                    
+                    // Receive messages
+                    conn.on('data', function(data) {
+                        console.log(`Master says: ${data}`)
+                    });
+                });
+
+                peer.on('call', function(call) {
+                    call.answer(); // Answer master's call
+                    
+                    // Show master stream in some video/canvas element.
+                    call.on('stream', function(remoteStream) {
+                        const videotrack = remoteStream.getVideoTracks()[0];
+                        videotrack.applyConstraints({ frameRate: { min: 60 } });
+                        const mainScreen = document.getElementById('mainScreen')
+                        mainScreen.innerHTML = ''
+                        const video = document.createElement('video')
+                        video.srcObject = remoteStream
+                        video.controls = true
+                        mainScreen.append(video)
+                    });
+                    
+                    // Video stream ended
+                    call.on('close', function() {
+                        const mainScreen = document.getElementById('mainScreen')
+                        mainScreen.innerHTML = ''
+                    });
+                });
+            }
+        })
+
+
+        function play() {
+            const mainScreen = document.getElementById('mainScreen')
+            mainScreen.innerHTML = ''
+            navigator.mediaDevices.getDisplayMedia({audio: true}).then(stream => {
+                const video = document.createElement('video')
+                video.srcObject = stream
+                video.muted = true
+                video.play()
+                mainScreen.append(video)
+
+                const videotrack = stream.getVideoTracks()[0];
+                videotrack.applyConstraints({ frameRate: { min: 60 } });
+
+                videoStreamSource = stream
+                
+                // Video stream started, create one mediaStreamCall per client
+                for (const peerID of connected) {
+                    mediaStreamCalls.push(peer.call(peerID, stream));
+                }
+
+                // Video stream ended, kill all mediaStreamCalls
+                stream.getVideoTracks()[0].addEventListener('ended', () => {
+                    mediaStreamCalls.forEach(call => {
+                        call.close()
+                    });
+                    videoStreamSource = undefined
+                });
+                
+            })
+        }
+    </script>
+</head>
+<body>
+    <div id="mainScreen"></div>
+    <button onclick="play()">Share</button>
+</body>
+</html>
